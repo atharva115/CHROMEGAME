@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chroma Catch</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            touch-action: none; /* Prevents pull-to-refresh and other touch gestures */
+            overflow: hidden;
+            background-color: #1a1a2e;
+        }
+        .vibrant-shadow {
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.5), 0 0 15px rgba(59, 130, 246, 0.5), 0 0 15px rgba(250, 204, 21, 0.5);
+        }
+        .neon-text {
+            text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 20px #e60073, 0 0 30px #e60073, 0 0 40px #e60073;
+        }
+        #gameCanvas {
+            background-color: #1a1a2e;
+            border-radius: 1rem;
+            cursor: none;
+        }
+        #adModal {
+            animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center h-screen overflow-hidden">
+
+    <div id="gameContainer" class="relative w-full h-full max-w-2xl max-h-[800px] flex flex-col items-center justify-center p-4">
+        <!-- Game Header -->
+        <div class="w-full flex justify-between items-center mb-4 px-2">
+            <h1 class="text-3xl font-bold neon-text">Chroma Catch</h1>
+            <div class="bg-gray-800 p-2 px-4 rounded-lg text-xl font-semibold">
+                Score: <span id="score">0</span>
+            </div>
+        </div>
+        
+        <!-- Game Canvas -->
+        <div class="relative w-full aspect-[3/4] rounded-2xl overflow-hidden vibrant-shadow">
+            <canvas id="gameCanvas"></canvas>
+
+            <!-- Game Over Screen -->
+            <div id="gameOverScreen" class="absolute inset-0 bg-black bg-opacity-70 flex-col items-center justify-center text-center p-8 hidden">
+                <h2 class="text-5xl font-bold text-red-500 mb-4">Game Over</h2>
+                <p class="text-2xl mb-2">Final Score</p>
+                <p id="finalScore" class="text-6xl font-bold mb-8">0</p>
+                <button id="restartButton" class="bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-8 rounded-full text-2xl transition-transform transform hover:scale-105">
+                    Play Again
+                </button>
+            </div>
+            
+            <!-- Start Screen -->
+            <div id="startScreen" class="absolute inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center text-center p-8">
+                <h2 class="text-5xl font-bold text-cyan-400 mb-4">Welcome!</h2>
+                <p class="text-xl mb-8 max-w-sm">Move the paddle to catch the falling orbs with the matching color.</p>
+                <button id="startButton" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-8 rounded-full text-2xl transition-transform transform hover:scale-105 animate-pulse">
+                    Start Game
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Ad Modal -->
+    <div id="adModal" class="fixed inset-0 bg-black bg-opacity-90 flex-col items-center justify-center z-50 hidden">
+        <div class="bg-gray-800 p-4 rounded-lg text-center max-w-sm w-11/12">
+            <div class="flex justify-between items-center border-b border-gray-700 pb-2 mb-4">
+                 <p class="text-sm text-gray-400">Advertisement</p>
+                 <button id="closeAdButton" class="bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center font-bold text-sm">X</button>
+            </div>
+            <div class="bg-gray-700 h-64 w-full flex items-center justify-center rounded-md">
+                <p class="text-lg">Your ad content would appear here.</p>
+            </div>
+             <!-- This is a placeholder for a real ad.
+                In a real application (e.g., using Cordova/Capacitor for Play Store),
+                you would integrate an ad SDK like Google AdMob here.
+                The ad SDK would handle showing the video or interstitial ad.
+            -->
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const finalScoreEl = document.getElementById('finalScore');
+        const adModal = document.getElementById('adModal');
+        const closeAdButton = document.getElementById('closeAdButton');
+
+        let score = 0;
+        let gameRunning = false;
+        let animationFrameId;
+        let adIntervalId;
+
+        const VIBRANT_COLORS = ['#ef4444', '#3b82f6', '#facc15', '#22c55e', '#a855f7']; // Red, Blue, Yellow, Green, Purple
+
+        // --- Game Objects ---
+        let paddle;
+        let orbs = [];
+
+        // --- Game Settings ---
+        let orbRadius = 15;
+        let initialOrbSpeed = 2;
+        let orbSpeed = initialOrbSpeed;
+        let orbSpawnRate = 120; // Lower is faster
+        let frameCount = 0;
+
+        function resizeCanvas() {
+            const container = canvas.parentElement;
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+
+        // --- Player Paddle ---
+        class Paddle {
+            constructor() {
+                this.width = 150;
+                this.height = 25;
+                this.x = (canvas.width - this.width) / 2;
+                this.y = canvas.height - 50;
+                this.colors = VIBRANT_COLORS;
+                this.segmentWidth = this.width / this.colors.length;
+            }
+
+            draw() {
+                this.colors.forEach((color, index) => {
+                    ctx.fillStyle = color;
+                    ctx.fillRect(this.x + (index * this.segmentWidth), this.y, this.segmentWidth, this.height);
+                });
+            }
+
+            update(mouseX) {
+                if (mouseX) {
+                   this.x = mouseX - this.width / 2;
+                }
+                // Keep paddle within canvas bounds
+                if (this.x < 0) this.x = 0;
+                if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
+            }
+        }
+        
+        // --- Falling Orbs ---
+        class Orb {
+            constructor() {
+                this.radius = orbRadius * (canvas.width / 500); // Scale radius with canvas size
+                this.x = Math.random() * (canvas.width - this.radius * 2) + this.radius;
+                this.y = -this.radius;
+                this.color = VIBRANT_COLORS[Math.floor(Math.random() * VIBRANT_COLORS.length)];
+                this.speed = orbSpeed;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+        }
+        
+        function handleOrbs() {
+            frameCount++;
+            if (frameCount % orbSpawnRate === 0) {
+                orbs.push(new Orb());
+            }
+
+            for (let i = orbs.length - 1; i >= 0; i--) {
+                const orb = orbs[i];
+                orb.update();
+                orb.draw();
+                
+                // Orb goes off screen
+                if (orb.y - orb.radius > canvas.height) {
+                    gameOver();
+                }
+
+                // Collision with paddle
+                if (orb.y + orb.radius > paddle.y && 
+                    orb.x > paddle.x && 
+                    orb.x < paddle.x + paddle.width) 
+                {
+                    const paddleSegment = Math.floor((orb.x - paddle.x) / paddle.segmentWidth);
+                    const hitColor = paddle.colors[paddleSegment];
+                    
+                    if (hitColor === orb.color) {
+                        score += 10;
+                        scoreEl.textContent = score;
+                        orbs.splice(i, 1);
+                        // Increase difficulty
+                        if (score % 50 === 0 && score > 0) {
+                           orbSpeed += 0.2;
+                        }
+                        if (score % 100 === 0 && orbSpawnRate > 40 && score > 0) {
+                           orbSpawnRate -= 10;
+                        }
+                    } else {
+                        gameOver();
+                    }
+                }
+            }
+        }
+
+        // --- Game Loop ---
+        function animate() {
+            if (!gameRunning) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            paddle.draw();
+            handleOrbs();
+            animationFrameId = requestAnimationFrame(animate);
+        }
+        
+        // --- Game State Functions ---
+        function init() {
+            score = 0;
+            scoreEl.textContent = '0';
+            orbs = [];
+            frameCount = 0;
+            orbSpeed = initialOrbSpeed;
+            orbSpawnRate = 120;
+            paddle = new Paddle();
+        }
+        
+        function startGame() {
+            init();
+            gameRunning = true;
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            adModal.classList.add('hidden');
+            
+            // Start ad timer
+            clearInterval(adIntervalId); // Clear any previous interval
+            adIntervalId = setInterval(showAd, 120000); // 2 minutes
+
+            animate();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            cancelAnimationFrame(animationFrameId);
+            clearInterval(adIntervalId);
+            finalScoreEl.textContent = score;
+            gameOverScreen.classList.remove('hidden');
+        }
+        
+        function showAd() {
+            gameRunning = false;
+            cancelAnimationFrame(animationFrameId);
+            adModal.classList.remove('hidden');
+        }
+        
+        function closeAd() {
+            adModal.classList.add('hidden');
+            gameRunning = true;
+            animate();
+        }
+        
+        // --- Event Listeners ---
+        window.addEventListener('resize', () => {
+             resizeCanvas();
+             if(paddle) { // If game has started, recenter paddle
+                paddle.x = (canvas.width - paddle.width) / 2;
+             }
+        });
+        
+        startButton.addEventListener('click', startGame);
+        restartButton.addEventListener('click', startGame);
+        closeAdButton.addEventListener('click', closeAd);
+        
+        function getMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            return evt.clientX - rect.left;
+        }
+        
+        canvas.addEventListener('mousemove', (e) => {
+            if (!gameRunning) return;
+            paddle.update(getMousePos(e));
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (!gameRunning) return;
+            e.preventDefault(); // Prevent scrolling
+            const touch = e.touches[0];
+            paddle.update(getMousePos(touch));
+        }, { passive: false });
+
+        // --- Initial Setup ---
+        resizeCanvas();
+
+    </script>
+</body>
+</html>
